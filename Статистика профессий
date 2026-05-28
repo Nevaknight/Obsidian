@@ -1,0 +1,332 @@
+```dataviewjs
+// 1. КОНФИГУРАЦИЯ ПУТЕЙ
+const registryPath = "Реестр данных/World of Warcraft/Реестр данных - профессии";
+const charactersFolder = '"Реестр данных/World of Warcraft/Профессии"';
+
+// 2. ПОЛУЧЕНИЕ ДАННЫХ ИЗ РЕЕСТРА
+const registryPage = dv.page(registryPath);
+const iconMapping = new Map();
+let tokenPrice = 0, goldEarned = 0, goldSpent = 0;
+let lastDataMonth = "месяц"; 
+const financeHistory = []; // Массив для истории финансов
+
+const monthNamesCase = {
+    "01": "январь", "02": "февраль", "03": "март", "04": "апрель",
+    "05": "май", "06": "июнь", "07": "июль", "08": "август",
+    "09": "сентябрь", "10": "октябрь", "11": "ноябрь", "12": "декабрь"
+};
+
+async function getFinanceData() {
+    try {
+        const file = app.vault.getAbstractFileByPath(registryPath + ".md");
+        if (!file) return;
+        const content = await app.vault.read(file);
+        const rows = content.match(/\|\s*([\d.]+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|/g);
+        if (rows && rows.length > 0) {
+            // Собираем историю всех записей
+            for (let row of rows) {
+                const parts = row.split('|').filter(p => p.trim() !== "");
+                const dateStr = parts[0].trim();
+                const monthNum = dateStr.split('.')[0];
+                const yearStr = dateStr.split('.')[1] || "";
+                const monthName = monthNamesCase[monthNum] || "месяц";
+                const earned = parseInt(parts[1].trim()) || 0;
+                const spent = parseInt(parts[2].trim()) || 0;
+                
+                financeHistory.push({
+                    dateStr: dateStr,
+                    monthName: monthName,
+                    year: yearStr,
+                    earned: earned,
+                    spent: spent,
+                    profit: earned - spent
+                });
+            }
+
+            // Данные для главных карточек (последняя запись)
+            const lastRow = financeHistory[financeHistory.length - 1];
+            lastDataMonth = lastRow.monthName;
+            goldEarned = lastRow.earned;
+            goldSpent = lastRow.spent;
+        }
+    } catch (e) { console.error("Ошибка финансов:", e); }
+}
+
+if (registryPage) {
+    const classes = ["Паладин", "Друид", "Монах", "Маг", "Пробудитель", "Воин", "Охотник на демонов", "Шаман", "Жрец", "Охотник", "Чернокнижник", "Разбойник", "Рыцарь смерти"];
+    classes.forEach(c => { if (registryPage[`Иконка: ${c}`]) iconMapping.set(c, registryPage[`Иконка: ${c}`]); });
+
+    const extraIcons = ["Кузнечное дело", "Броня", "Чары", "Хлам", "Инструменты", "Зелья", "Настои", "Алхимия", "Фартук", "Шапка", "Наложение чар", "Масла", "Инженерное дело", "Начертание", "Ювелирное дело", "Портняжное дело", "Флаконы", "Зелье безрассудства", "Трактаты", "Рулоны"];
+    extraIcons.forEach(n => { if (registryPage[`Иконка: ${n}`]) iconMapping.set(n, registryPage[`Иконка: ${n}`]); });
+    tokenPrice = registryPage["Цена: Жетон World of Warcraft"] || 0;
+}
+
+await getFinanceData();
+
+const pages = dv.pages(charactersFolder);
+const charDataMap = new Map();
+const professionGroups = new Map();
+const dandanCharacters = [];
+
+pages.forEach(p => {
+    const name = p.Имя || p.file.name;
+    const server = p.Сервер || "Сервер";
+    const charKey = `${name.trim()}-${server.trim()}`;
+    const isMax = p["Максимальный уровень"] === true;
+    
+    // Сохраняем дополнительные данные для списка Макс. уровня
+    if (!charDataMap.has(charKey)) {
+        charDataMap.set(charKey, { 
+            isMaxLevel: isMax,
+            name: name,
+            server: server,
+            classIcon: iconMapping.get(p.Класс) || ""
+        });
+    } else if (isMax) {
+        charDataMap.get(charKey).isMaxLevel = true;
+    }
+
+    let profs = p.Профессия ? (Array.isArray(p.Профессия) ? p.Профессия : [p.Профессия]) : [];
+    profs.forEach(prof => {
+        const profName = prof.trim();
+        if (!professionGroups.has(profName)) professionGroups.set(profName, []);
+        professionGroups.get(profName).push(p);
+    });
+
+    // Оптимизированная логика "Дандан требуется для" (< 2 эпических оружий)
+    let epicWeaponCount = 0;
+    for (let key in p) {
+        if (key.startsWith("Предметы:")) {
+            let items = p[key] ? (Array.isArray(p[key]) ? p[key] : [p[key]]) : [];
+            if (items.some(i => i.toString().includes("Оружие:") && i.toString().includes("Эпическое"))) {
+                epicWeaponCount++;
+            }
+        }
+    }
+    
+    // Показываем только тех, у кого МЕНЕЕ 2 эпических оружий
+    if (epicWeaponCount < 2) {
+        dandanCharacters.push({
+            nameHtml: `<span style="color:var(--text-normal); font-weight:bold;">${name}</span>`,
+            rawName: name, server: server, classIcon: iconMapping.get(p.Класс) || ""
+        });
+    }
+});
+
+const totalUniqueCharacters = charDataMap.size;
+
+// Формируем список персонажей с максимальным уровнем
+const maxLevelCharsList = Array.from(charDataMap.values())
+    .filter(c => c.isMaxLevel)
+    .map(c => ({
+        nameHtml: `<span style="font-weight:bold;">${c.name}</span>`,
+        rawName: c.name,
+        server: c.server,
+        classIcon: c.classIcon
+    }));
+const maxLevelCharacters = maxLevelCharsList.length;
+
+const mainWrapper = document.createElement("div");
+mainWrapper.style.cssText = "display: flex; flex-direction: column; gap: 20px;";
+
+const style = document.createElement('style');
+style.textContent = `
+    .tool-btn { width: 110px; padding: 8px 0; cursor: pointer; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); font-weight: bold; text-align: center; }
+    .wow-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 10000; backdrop-filter: blur(4px); }
+    .wow-modal-content { background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 16px; width: 540px; max-width: 95%; max-height: 75vh; display: flex; flex-direction: column; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
+    .wow-modal-header { padding: 15px 20px; border-bottom: 1px solid var(--background-modifier-border); background: var(--background-secondary); border-radius: 16px 16px 0 0; display: flex; justify-content: space-between; align-items: center; }
+    .wow-modal-body { padding: 0; overflow-y: auto; overflow-x: hidden; }
+    .wow-list-item { padding: 12px 20px; border-bottom: 1px solid var(--background-modifier-border); display: flex; align-items: center; gap: 14px; }
+    .wow-list-item:nth-child(even) { background: var(--background-secondary); opacity: 0.9; }
+    .wow-char-name { flex-grow: 1; font-size: 1.35em; text-align: left; font-weight: 500; display: flex; align-items: center; text-transform: capitalize; }
+    .wow-char-server { font-size: 1.1em; opacity: 0.4; font-style: italic; text-align: right; margin-left: 15px; }
+    .ui-icon { vertical-align: middle; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); margin-right: 8px; flex-shrink: 0; }
+    #wow-styled-tooltip { position: fixed; display: none; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); z-index: 999999; border-radius: 12px; pointer-events: none; min-width: 250px; }
+    .tooltip-header { padding: 10px 15px; background: var(--background-secondary); font-weight: bold; display: flex; justify-content: space-between; border-radius: 12px 12px 0 0; border-bottom: 1px solid var(--background-modifier-border); }
+    .tooltip-footer { padding: 8px 15px; font-size: 0.85em; opacity: 0.6; text-align: center; border-top: 1px solid var(--background-modifier-border); }
+    .wow-badge { display: inline-flex; justify-content: center; align-items: center; text-align: center; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: bold; cursor: pointer; width: auto; min-width: 44px; flex-shrink: 0; box-sizing: border-box; }
+    .wow-badge-green { background: rgba(76,175,80,0.15); color: #4caf50; }
+    .wow-badge-red { background: rgba(244,67,54,0.15); color: #f44336; }
+    .wow-badge-blue { background: rgba(33,150,243,0.15); color: #2196f3; }
+    .wow-badge-small { /* Ширина теперь адаптивна у всех бейджей */ }
+    .wow-prof-card { background: var(--background-secondary); border-radius: 12px; padding: 18px; border: 1px solid var(--background-modifier-border); display: flex; flex-direction: column; gap: 10px; }
+    .wow-prof-row { display: flex; justify-content: space-between; align-items: center; background: var(--background-primary); padding: 8px 12px; border-radius: 8px; min-height: 45px; gap: 12px; }
+    .wow-prof-header { text-align: center; border-bottom: 2px solid var(--interactive-accent); padding-bottom: 10px; margin-bottom: 5px; }
+    .wow-priority-info { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--background-modifier-border); text-align: center; font-size: 1.1em; opacity: 0.4; font-style: italic; line-height: 1.4; }
+    .wow-stat-card { background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 10px; padding: 16px; text-align: center; box-shadow: var(--shadow-s); transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+    .wow-stat-card.clickable:hover { cursor: pointer; border-color: var(--interactive-accent); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
+    .wow-stat-title { font-size: 0.7em; opacity: 0.5; text-transform: uppercase; letter-spacing: 1.2px; font-weight: 700; margin-bottom: 8px; }
+`;
+document.head.appendChild(style);
+
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+const openListModal = (title, list) => {
+    const overlay = document.createElement("div"); overlay.className = "wow-modal-overlay";
+    const itemsHtml = list.sort((a,b)=>a.rawName.localeCompare(b.rawName)).map(c => `<div class="wow-list-item"><div class="wow-icon-container">${c.classIcon ? `<img src="${c.classIcon}" style="width:28px;height:28px;border-radius:4px;">` : "👤"}</div><span class="wow-char-name">${c.nameHtml}</span><span class="wow-char-server">${c.server}</span></div>`).join("");
+    overlay.innerHTML = `<div class="wow-modal-content"><div class="wow-modal-header"><h3 style="margin:0">${title}</h3><span style="opacity:0.4; font-weight:bold;">${list.length}</span></div><div class="wow-modal-body">${itemsHtml}</div><div style="padding:15px; display:flex; justify-content:center; border-top:1px solid var(--background-modifier-border);"><button class="tool-btn" id="wow-close-modal">Закрыть</button></div></div>`;
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    document.body.appendChild(overlay);
+    overlay.querySelector("#wow-close-modal").onclick = () => overlay.remove();
+};
+
+const openFinanceModal = (title, type) => {
+    const overlay = document.createElement("div"); overlay.className = "wow-modal-overlay";
+    const reversedHistory = [...financeHistory].reverse();
+    const itemsHtml = reversedHistory.map(item => {
+        let val = 0, color = "", icon = "💰";
+        if (type === "profit") { val = item.profit; color = "#4caf50"; icon = "📈"; }
+        if (type === "earned") { val = item.earned; color = "var(--text-normal)"; icon = "📥"; }
+        if (type === "spent") { val = item.spent; color = "#f44336"; icon = "📤"; }
+        
+        return `<div class="wow-list-item">
+            <div class="wow-icon-container"><span style="font-size:24px">${icon}</span></div>
+            <span class="wow-char-name">${item.monthName} ${item.year}</span>
+            <span class="wow-char-server" style="color:${color}; font-weight:bold; font-size:1.2em; opacity:1;">${formatGold(val)}</span>
+        </div>`;
+    }).join("");
+    overlay.innerHTML = `<div class="wow-modal-content"><div class="wow-modal-header"><h3 style="margin:0">${title}</h3><span style="opacity:0.4; font-weight:bold;">Записей: ${reversedHistory.length}</span></div><div class="wow-modal-body">${itemsHtml}</div><div style="padding:15px; display:flex; justify-content:center; border-top:1px solid var(--background-modifier-border);"><button class="tool-btn" id="wow-close-modal">Закрыть</button></div></div>`;
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    document.body.appendChild(overlay);
+    overlay.querySelector("#wow-close-modal").onclick = () => overlay.remove();
+};
+
+const createStatCardHTML = (title, value, color) => `<div class="wow-stat-title">${title}</div><div style="font-size:1.7em; font-weight:800; color:${color}; line-height:1;">${value}</div>`;
+
+const appendFinanceCard = (title, value, color, type) => {
+    const card = document.createElement("div");
+    if (type) {
+        card.className = "wow-stat-card clickable";
+        card.onclick = () => openFinanceModal(`История: ${title.split(' за ')[0]}`, type);
+    } else {
+        card.className = "wow-stat-card";
+    }
+    card.innerHTML = createStatCardHTML(title, value, color);
+    financeGrid.appendChild(card);
+};
+
+// --- ФИНАНСЫ ---
+const netProfit = goldEarned - goldSpent;
+const eurConversion = (tokenPrice > 0 && netProfit > 0) ? Math.floor(netProfit / tokenPrice) * 13 : 0;
+const gameMonths = (tokenPrice > 0 && netProfit > 0) ? Math.floor(netProfit / tokenPrice) : 0;
+const formatGold = (num) => num.toLocaleString('ru-RU');
+
+const financeGrid = document.createElement("div");
+financeGrid.style.cssText = "display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:15px; width:100%;";
+
+// Кликабельные карточки финансов
+appendFinanceCard("Прибыль за " + lastDataMonth, formatGold(netProfit), "#4caf50", "profit");
+appendFinanceCard("Получено за " + lastDataMonth, formatGold(goldEarned), "var(--text-normal)", "earned");
+appendFinanceCard("Потрачено за " + lastDataMonth, formatGold(goldSpent), "#f44336", "spent");
+// Некликабельные карточки
+appendFinanceCard("Цена Жетона", formatGold(tokenPrice), "#fbc02d", null);
+appendFinanceCard("Конвертация в Евро", eurConversion + " €", "#2196f3", null);
+appendFinanceCard("Оплата игры на", gameMonths + " " + (Math.abs(gameMonths) % 10 === 1 && Math.abs(gameMonths) % 100 !== 11 ? "месяц" : "месяцев"), "#a335ee", null);
+
+mainWrapper.appendChild(financeGrid);
+
+// --- СТАТИСТИКА ПЕРСОНАЖЕЙ И ДАНДАН (В одну строку) ---
+const charStatsGrid = document.createElement("div");
+charStatsGrid.style.cssText = "display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:15px; width:100%;";
+
+// Карточка Дандан (Кликабельная, черные цифры)
+const dandanWrap = document.createElement("div");
+dandanWrap.innerHTML = `<div class="wow-stat-card clickable">${createStatCardHTML("Дандан требуется для", dandanCharacters.length, "var(--text-normal)")}</div>`;
+const dandanCard = dandanWrap.firstChild;
+dandanCard.onclick = () => openListModal("Дандан требуется для", dandanCharacters);
+charStatsGrid.appendChild(dandanCard);
+
+// Карточка Всего персонажей (Черные цифры)
+const totalWrap = document.createElement("div");
+totalWrap.innerHTML = `<div class="wow-stat-card">${createStatCardHTML("Всего персонажей", totalUniqueCharacters, "var(--text-normal)")}</div>`;
+charStatsGrid.appendChild(totalWrap.firstChild);
+
+// Карточка Максимальный уровень (Кликабельная, черные цифры)
+const maxWrap = document.createElement("div");
+maxWrap.innerHTML = `<div class="wow-stat-card clickable">${createStatCardHTML("Максимальный уровень", maxLevelCharacters, "var(--text-normal)")}</div>`;
+const maxCard = maxWrap.firstChild;
+maxCard.onclick = () => openListModal("Максимальный уровень", maxLevelCharsList);
+charStatsGrid.appendChild(maxCard);
+
+mainWrapper.appendChild(charStatsGrid);
+
+// --- ГРИД ПРОФЕССИЙ ---
+const gridContainer = document.createElement("div");
+gridContainer.style.cssText = "display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:20px; align-items:start;";
+mainWrapper.appendChild(gridContainer);
+
+let tooltip = document.getElementById("wow-styled-tooltip") || document.createElement("div");
+tooltip.id = "wow-styled-tooltip"; if (!tooltip.parentElement) document.body.appendChild(tooltip);
+
+const getIconHtml = (key, fall, size=20) => { const u = key ? iconMapping.get(key) : null; return u ? `<img src="${u}" class="ui-icon" style="width:${size}px; height:${size}px;">` : `<span style="font-size:${size*0.8}px; line-height:1; display:inline-block; vertical-align:middle; margin-right:8px;">${fall}</span>`; };
+
+const showTooltip = (e, title, list) => {
+    const limit = 8;
+    tooltip.innerHTML = `<div class="tooltip-header"><span>${title}</span><span style="opacity:0.4;">${list.length}</span></div><div class="wow-modal-body" style="background:var(--background-primary)">${list.slice(0,limit).map(c=>`<div class="wow-list-item" style="padding:8px 12px; border-bottom:1px solid var(--background-modifier-border);"><div class="wow-icon-container">${c.classIcon?`<img src="${c.classIcon}" style="width:24px;height:24px;border-radius:4px;">`:"👤"}</div><span class="wow-char-name" style="font-size:1.1em;">${c.nameHtml}</span></div>`).join("")}</div>${list.length>limit?`<div class="tooltip-footer">Кликните, чтобы увидеть всех</div>`:""}`;
+    tooltip.style.display = "block"; tooltip.style.left = Math.min(e.clientX+15, window.innerWidth-tooltip.offsetWidth-15)+"px"; tooltip.style.top = Math.min(e.clientY+15, window.innerHeight-tooltip.offsetHeight-15)+"px";
+};
+
+const sortedNames = Array.from(professionGroups.keys()).sort((a,b) => { const p = n => (n==="Алхимия"?1:n==="Наложение чар"?2:3); return p(a)!==p(b) ? p(a)-p(b) : a.localeCompare(b,'ru'); });
+
+for (let pName of sortedNames) {
+    const rows = professionGroups.get(pName);
+    let sW={y:[],n:[]}, sE={y:[],n:[]}, sH={y:[],n:[]}, sA={y:[],n:[]};
+    const specsMap = new Map();
+    
+    for (let char of rows) {
+        const name = char.Имя || char.file.name; const server = char.Сервер || ""; const icon = iconMapping.get(char.Класс) || ""; 
+        let items = char[`Предметы: ${pName}`] || []; if(!Array.isArray(items)) items=[items];
+        const chk = pre => { const f = items.find(i=>i.toString().startsWith(pre)); return { ex: !!f, epic: f?.toString().includes("Эпическое") }; };
+        const w=chk("Оружие:"), h=chk("Шапка:"), a=chk("Фартук:"), e=items.some(i=>i.toString().includes("зачарено"));
+        const wrap = (o) => ({ nameHtml: `<span style="color:${o.epic?"#a335ee":"inherit"}; font-weight:${o.epic?"bold":"normal"};">${name}</span>`, rawName: name, server, classIcon: icon });
+        
+        (w.ex?sW.y:sW.n).push(wrap(w)); (e?sE.y:sE.n).push(wrap({epic:false})); (h.ex?sH.y:sH.n).push(wrap(h)); (a.ex?sA.y:sA.n).push(wrap(a));
+        
+        let sProp = char[`Специализация: ${pName}`] || []; if(!Array.isArray(sProp)) sProp=[sProp];
+        sProp.forEach(s => { const t = s.trim(); if (!specsMap.has(t)) specsMap.set(t, []); specsMap.get(t).push(wrap({epic:false})); });
+    }
+
+    const card = document.createElement("div"); card.className = "wow-prof-card";
+    card.innerHTML = `<div class="wow-prof-header"><h3 style="margin:0; display:flex; align-items:center; justify-content:center;">${getIconHtml(pName, "📂", 24)}${pName}</h3><div style="font-size:0.85em; opacity:0.7;">Персонажей: <b>${rows.length}</b></div></div>`;
+
+    const addRow = (iconK, label, fall, yesL, noL) => {
+        const r = document.createElement("div"); r.className = "wow-prof-row";
+        r.innerHTML = `<div style="font-weight:bold; display:flex; align-items:center; flex:1; min-width:0;">${getIconHtml(iconK, fall, 30)}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</span></div>`;
+        const bCon = document.createElement("div"); bCon.style.cssText = "display:flex; gap:8px; flex-shrink:0;";
+        const btn = (txt, c, lst, red) => {
+            const b = document.createElement("span"); b.className = `wow-badge ${red?"wow-badge-red":"wow-badge-green"} wow-badge-small`; b.innerHTML = c!==null?`${c}`:txt;
+            b.onmouseenter=e=>showTooltip(e,`${label}: ${txt}`,lst); b.onmousemove=e=>{tooltip.style.left=Math.min(e.clientX+15,window.innerWidth-tooltip.offsetWidth-15)+"px";tooltip.style.top=Math.min(e.clientY+15,window.innerHeight-tooltip.offsetHeight-15)+"px";}; b.onmouseleave=()=>{tooltip.style.display="none";}; b.onclick=()=>{tooltip.style.display="none";openListModal(`${pName}: ${label} (${txt})`,lst);}; return b;
+        };
+        if (noL.length === 0) bCon.appendChild(btn("Собрано", yesL.length, yesL, false)); 
+        else if (yesL.length === 0) bCon.appendChild(btn("Нет", noL.length, noL, true)); 
+        else { bCon.appendChild(btn("Собрано", yesL.length, yesL, false)); bCon.appendChild(btn("Нет", noL.length, noL, true)); }
+        r.appendChild(bCon); card.appendChild(r);
+    };
+
+    addRow("Инструменты", "Оружие", "⚔️", sW.y, sW.n);
+    addRow("Чары", "Чары", "🪄", sE.y, sE.n);
+    addRow("Шапка", "Шапка", "🎩", sH.y, sH.n);
+    addRow("Фартук", "Фартук", "🎽", sA.y, sA.n);
+
+    specsMap.forEach((list, s) => {
+        const l = s.toLowerCase(); let iK = iconMapping.has(s) ? s : (l.includes("зель")?"Зелья":l.includes("насто")?"Настои":l.includes("масл")?"Масла":l.includes("брон")?"Броня":l.includes("инжен")||l.includes("инструмент")?"Инструменты":l.includes("налож")||l.includes("чар")?"Наложение чар":l.includes("кузн")||l.includes("оружи")?"Кузнечное дело":l.includes("алхим")?"Алхимия":l.includes("начерт")?"Начертание":l.includes("ювел")?"Ювелирное дело":l.includes("портн")?"Портняжное дело":null);
+        const r = document.createElement("div"); r.className = "wow-prof-row";
+        r.innerHTML = `<div style="font-weight:bold; display:flex; align-items:center; flex:1; min-width:0;">${getIconHtml(iK, "❔", 30)}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${s}</span></div>`;
+        const bCon = document.createElement("div"); bCon.style.cssText = "display:flex; gap:8px; flex-shrink:0;";
+        const b = document.createElement("span"); b.className = "wow-badge wow-badge-blue wow-badge-small"; b.innerHTML = list.length;
+        b.onmouseenter=e=>showTooltip(e,s,list); b.onmousemove=e=>{tooltip.style.left=Math.min(e.clientX+15,window.innerWidth-tooltip.offsetWidth-15)+"px";tooltip.style.top=Math.min(e.clientY+15,window.innerHeight-tooltip.offsetHeight-15)+"px";}; b.onmouseleave=()=>{tooltip.style.display="none";}; b.onclick=()=>{tooltip.style.display="none";openListModal(s,list);};
+        bCon.appendChild(b);
+        r.appendChild(bCon);
+        card.appendChild(r);
+    });
+
+    const addInfo = (h) => { const b = document.createElement("div"); b.className = "wow-priority-info"; b.innerHTML = h; card.appendChild(b); };
+    if (pName==="Алхимия") addInfo("<div>Приоритет экипировки:</div><div>Оружие > Шапка = Фартук</div><div>Начертание - Кожевничество - Портняжное дело</div>");
+    else if (pName==="Наложение чар") addInfo("<div>Приоритет экипировки:</div><div>Оружие > Шапка > Фартук</div><div>Чары - Портняжное дело - Ювелирное дело</div>");
+    else if (pName==="Кузнечное дело") addInfo("<div>Приоритет экипировки:</div><div>Оружие > Фартук > Шапка</div><div>Кузнечное дело - Кожевничество - Кузнечное дело</div>");
+    else if (pName==="Инженерное дело") addInfo("<div>Приоритет экипировки:</div><div>Оружие > Шапка > Фартук</div><div>Инженерное дело - Инженерное дело - Кожевничество</div>");
+
+    gridContainer.appendChild(card);
+}
+
+dv.container.appendChild(mainWrapper);
+```
