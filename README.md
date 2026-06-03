@@ -1,5 +1,5 @@
 # Obsidian
-Мои коды для заметок в Obsidian.
+Мои коды для заметок в [Obsidian](https://obsidian.md/).
 
 Для работы кода требуется [плагин](https://github.com/blacksmithgu/obsidian-dataview)
 
