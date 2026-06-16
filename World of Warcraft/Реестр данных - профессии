@@ -1,5 +1,6 @@
 ---
 "Цена: Жетон World of Warcraft": 340000
+Цвет качества предметов: https://wowpedia.fandom.com/wiki/Quality
 "Иконка: Паладин": https://wow.zamimg.com/images/wow/icons/large/classicon_paladin.jpg
 "Иконка: Друид": https://wow.zamimg.com/images/wow/icons/large/classicon_druid.jpg
 "Иконка: Монах": https://wow.zamimg.com/images/wow/icons/large/classicon_monk.jpg
@@ -33,9 +34,13 @@
 "Иконка: Зелье безрассудства": https://wow.zamimg.com/images/wow/icons/large/inv_12_profession_alchemy_voidpotion_red.jpg
 "Иконка: Трактаты": https://wow.zamimg.com/images/wow/icons/large/inv_misc_profession_book_inscription.jpg
 "Иконка: Рулоны": https://wow.zamimg.com/images/wow/icons/large/inv_12_profession_tailoring_tailoringspecializations_nimbleneedlework.jpg
+"Иконка: Кожевничество": https://wow.zamimg.com/images/wow/icons/large/ui_profession_leatherworking.jpg
+"Иконка: Призмы": https://wow.zamimg.com/images/wow/icons/large/inv_12_profession_jewelcrafting_combined_gem_reagent_multicoloured.jpg
 ---
 
 | Месяц   | Получено Золота | Потрачено Золота |
 | ------- | --------------- | ---------------- |
-| 04.2026 | 2271986         | 1483694          |
+| 04.2026 | 2102985         | 2163568          |
+| 05.2026 | 7010891         | 3664028          |
+
 
